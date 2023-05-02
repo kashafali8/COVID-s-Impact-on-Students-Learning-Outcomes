@@ -1,0 +1,151 @@
+\documentclass{article}
+\usepackage{booktabs}
+
+\begin{document}
+
+\begin{table}[ht]
+\centering
+\caption{ELA Scores by Year and Test}
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Year &  & ELA3 &  & ELA4 &  & ELA5 &  \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
+ & Test & 0 & 1 & 0 & 1 & 0 & 1 \\
+\midrule
+2018 &  & 595.385 & 600.163 & 594.345 & 599.688 & 595.093 & 599.883 \\
+2019 &  & 595.021 & 598.800 & 594.219 & 598.859 & 593.447 & 599.775 \\
+2021 &  & 598.590 & 600.274 & 600.717 & 603.494 & 599.002 & 603.005 \\
+2022 &  & 593.833 & 597.883 & 591.578 & 596.220 & 596.064 & 601.277 \\
+\bottomrule
+\end{tabular}
+\quad
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Year &  & ELA6 &  & ELA7 &  & ELA8 &  \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
+ & Test & 0 & 1 & 0 & 1 & 0 & 1 \\
+\midrule
+2018 &  & 593.979 & 600.574 & 592.890 & 600.418 & 592.103 & 600.732 \\
+2019 &  & 592.575 & 598.161 & 593.107 & 599.972 & 592.569 & 600.184 \\
+2021 &  & 597.728 & 603.417 & 596.472 & 601.287 & 598.156 & 603.489 \\
+2022 &  & 598.102 & 603.828 & 598.261 & 604.641 & 593.138 & 601.171 \\
+\bottomrule
+\end{tabular}
+\label{tab:ela_scores}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{MATH ASSESSMENT NAME Scores by YEAR and Gender}
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+Year &  & MATH3 &  & MATH4 &  \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6}
+ & Gender & 0 & 1 & 0 & 1 \\
+\midrule
+2018 &  & 598.427 & 598.946 & 597.448 & 598.051 \\
+2019 &  & 598.739 & 598.224 & 599.011 & 598.202 \\
+2021 &  & 593.727 & 591.899 & 593.836 & 592.857 \\
+2022 &  & 594.295 & 593.599 & 594.274 & 593.218 \\
+\midrule
+Year &  & MATH5 &  & MATH6 &  \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6}
+ & Gender & 0 & 1 & 0 & 1 \\
+\midrule
+2018 &  & 596.943 & 597.007 & 598.257 & 598.119 \\
+2019 &  & 597.468 & 598.242 & 598.694 & 598.904 \\
+2021 &  & 593.636 & 592.641 & 594.807 & 592.523 \\
+2022 &  & 593.321 & 591.931 & 595.562 & 594.968 \\
+\midrule
+Year &  & MATH7 &  & MATH8 &  \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6}
+ & Gender & 0 & 1 & 0 & 1 \\
+\midrule
+2018 &  & 595.422 & 598.221 & 595.725 & 598.796 \\
+2019 &  & 597.642 & 599.450 & 595.841 & 599.707 \\
+2021 &  & 593.374 & 594.033 & 593.688 & 594.247 \\
+2022 &  & 594.179 & 595.505 & 592.336 & 594.608 \\
+\bottomrule
+\end{tabular}
+\label{tab:math_scores}
+\end{table}
+
+
+
+
+\begin{table}[ht]
+\centering
+\caption{Science Scores by Year and Test}
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Year &  & Science4 &  &  & Science8 &  &  \\
+\cmidrule(lr){3-4} \cmidrule(lr){6-7}
+ & Test & 0 & 1 &  & 0 & 1 &  \\
+\midrule
+2018 &  & 81.062857 & 81.594688 &  & 66.724706 & 68.034772 &  \\
+2019 &  & 79.869318 & 80.898501 &  & 66.036655 & 66.364035 &  \\
+2021 &  & 75.178784 & 74.756786 &  & 59.967742 & 60.090571 &  \\
+2022 &  & 75.733087 & 75.673861 &  & 63.268176 & 63.172093 &  \\
+\bottomrule
+\end{tabular}
+\label{tab:science_scores}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Summary statistics for Math Mean Scores by Gender}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+ & Male\_MEAN\_SCORE & Female\_MEAN\_SCORE \\
+\midrule
+count & 41419.000000 & 41419.000000 \\
+mean & 595.734470 & 595.999879 \\
+std & 6.345676 & 6.498444 \\
+min & 578.000000 & 578.000000 \\
+max & 611.000000 & 612.000000 \\
+difference between 25\% and 75\% & 6.0 & 6.0\\
+\bottomrule
+\end{tabular}
+\label{tab:mean_scores}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Summary statistics for Math Mean Scores by Gender}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+ & Male\_MEAN\_SCORE & Female\_MEAN\_SCORE \\
+\midrule
+count & 16069.000000 & 16069.000000 \\
+mean & 71.471053 & 71.667334 \\
+std & 8.778889 & 8.798180 \\
+min & 39.000000 & 40.000000 \\
+max & 88.000000 & 88.000000 \\
+difference between 25\% and 75\% & 12.000000 & 12.000000\\
+\bottomrule
+\end{tabular}
+\label{tab:math_mean_scores}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{Summary statistics for Mean Scores by Gender}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+ & Male\_MEAN\_SCORE & Female\_MEAN\_SCORE \\
+\midrule
+count & 42512.000000 & 42512.000000 \\
+mean & 595.324308 & 600.713257 \\
+std & 6.018730 & 5.654198 \\
+min & 580.000000 & 584.000000 \\
+max & 616.000000 & 619.000000 \\
+difference between 25\% and 75\% & 8.0 & 7.0 \\
+\bottomrule
+\end{tabular}
+\label{tab:mean_scores}
+\end{table}
+
+
+
+
+\end{document}
