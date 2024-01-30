@@ -1,0 +1,1799 @@
+---
+title: "POLSCI643 - Final Project"
+author: "Kashaf Ali"
+output: pdf_document
+---
+
+## Model 1: Fixed Effects Model (with Science Assessments)
+
+1. Data Setup
+
+```{r regressions1a, results="hide", message=FALSE}
+#Load Libraries
+library(rjags)
+
+# Load Dataset
+educov <- read.csv("educov.csv")
+
+# Convert to a factor
+educov$ASSESSMENT_NAME <- as.factor(educov$ASSESSMENT_NAME)
+educov$ENTITY_CD <- as.factor(educov$ENTITY_CD)
+educov$YEAR <- as.factor(educov$YEAR)
+
+jags.data <- list(
+  Gender_MEAN_SCORE = educov$Gender_MEAN_SCORE,
+  Female = educov$Female,
+  post_covid = educov$post_covid,
+  race_gap = educov$race_gap,
+  ell_gap = educov$ell_gap,
+  ENTITY_CD = educov$ENTITY_CD,
+  YEAR = educov$YEAR,
+  ASSESSMENT_NAME = educov$ASSESSMENT_NAME,
+  N = nrow(educov), 
+  unique_schools = length(unique(educov$ENTITY_CD)),
+  unique_assessments = length(unique(educov$ASSESSMENT_NAME)),
+  unique_years = length(unique(educov$YEAR))
+)
+  
+```
+
+2. Model Setup
+
+```{r regressions1b, results="hide", message=FALSE}
+# Model specification in JAGS
+model_FE <- "model {
+  for (i in 1:N) {
+    Gender_MEAN_SCORE[i] ~ dnorm(mu[i], tau)
+    mu[i] <- b_0+ b_female*Female[i] + b_postcovid*post_covid[i] + 
+              b_racegap*race_gap[i] + b_ellgap*ell_gap[i] +
+              b_school[ENTITY_CD[i]] + b_year[YEAR[i]]  +
+              b_assess[ASSESSMENT_NAME[i]] + 
+              b_female_postcovid * Female[i] * post_covid[i]
+  }
+  
+  # Priors for coefficients
+  b_0 ~ dnorm(0, 0.001)
+  b_female ~ dnorm(0, 0.001)
+  b_postcovid ~ dnorm(0, 0.001)
+  b_racegap ~ dnorm(0, 0.001)
+  b_ellgap ~ dnorm(0, 0.001)
+  b_female_postcovid ~ dnorm(0, 0.001)
+  
+   # School effects
+  for (i in 1:unique_schools) {
+    b_school[i] ~ dnorm(0, 0.001)
+  }
+  
+  # Year effects
+  for (i in 1:unique_years) {
+    b_year[i] ~ dnorm(0, 0.001)
+  }
+
+  # Assessment effects
+  for (i in 1:unique_assessments) {
+    b_assess[i] ~ dnorm(0, 0.001)
+  }
+  
+  tau ~ dgamma(0.001, 0.001) ## (inverse) Variance
+  sigma2 <- 1 / tau
+}"
+
+write(model_FE,file="educov_FE.jags")
+
+```
+
+3. Run the Model
+
+```{r regressions1c, results="hide", message=FALSE}
+set.seed(123)
+# Run Model
+mod_FE <- jags.model(file = "educov_FE.jags",
+                    data = jags.data, n.chains = 1)
+update(mod_FE, 10000)
+out_FE <- coda.samples(model = mod_FE,
+  variable.names = c("b_0", "b_female", "b_postcovid","b_racegap",
+                     "b_ellgap", "b_female_postcovid", "b_year", 
+                     "b_school", "b_assess", "sigma2"),
+  n.iter = 20000
+)
+
+```
+
+4. Summary Results
+
+
+```{r regressions1d,  message=FALSE}
+summary(out_FE)
+```
+
+5. Coefficient Plot
+
+```{r regressions1e,  message=FALSE}
+
+# Creating results matrix
+FE_matrix <- as.matrix(out_FE[[1]])
+
+# Calculate the mean of each column
+means <- apply(FE_matrix, 2, mean)
+quantile_2_5 <- apply(FE_matrix, 2, function(x) quantile(x, 0.025))
+quantile_97_5 <- apply(FE_matrix, 2, function(x) quantile(x, 0.975))
+
+# Convert data to a dataframe
+FE_df <- data.frame(variable = colnames(FE_matrix),
+                            mean_value = means,
+                            quantile_2_5 = quantile_2_5,
+                            quantile_97_5 = quantile_97_5)
+
+```
+
+```{r regressions1f, message=FALSE, fig.height=3, fig.width=4}
+variables_of_interest <- c("b_ellgap", "b_racegap", 
+                           "b_female_postcovid", "b_female")
+subset_FE_df <- FE_df[FE_df$variable %in% variables_of_interest, ]
+
+# Define colors for specific variables
+subset_FE_df$color <- ifelse(subset_FE_df$variable %in% 
+                               c("b_female", "b_female_postcovid"), 
+                             "blue", "grey")
+
+# Load the dplyr package
+library(dplyr)
+
+# Define the desired order
+desired_order <- c("b_female", "b_female_postcovid", "b_racegap", "b_ellgap")
+
+# Convert the 'variable' column to a factor with desired order
+subset_FE_df$variable <- factor(subset_FE_df$variable, levels = desired_order)
+
+# Sort the data frame by the 'variable' column
+sorted_data <- subset_FE_df %>%
+  arrange(variable)
+
+# Plotting the means using ggplot2
+library(ggplot2)
+
+ggplot(sorted_data, aes(x = variable, y = mean_value, fill = color)) +
+  geom_point(size = 2, position = position_dodge(width = 0.5), shape = 21) + 
+  geom_errorbar(aes(ymin = quantile_2_5, ymax = quantile_97_5), width = 0.2, 
+                position = position_dodge(width = 0.5), 
+                color=sorted_data$color) +  
+  geom_text(aes(label = round(mean_value, 2)), 
+            position = position_dodge(width = 0.5), 
+            vjust = -0.5, size = 3, color = "black") +
+  labs(title = "Coefficient Plot for Bayesian Fixed Effects Model",
+       x = "Coefficient",
+       y = "Estimate") +
+  coord_flip() +
+  scale_fill_manual(values = c("blue" = "blue", "grey" = "grey")) +
+  theme(panel.background = element_rect(fill = "white"),
+        panel.border = element_rect(color = "black", fill = NA),
+        panel.grid = element_blank(), 
+        plot.title = element_text(hjust = 0.5, size = 10),
+        axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        legend.position = "none",
+        axis.title.x = element_text(size = 8),  
+        axis.title.y = element_text(size = 8)
+        ) +
+  guides(fill = guide_legend(reverse = FALSE))
+  
+```
+
+6. Checking for Science Assessment Outliers
+
+6.1 Checking for Mean Scores for all Assessments in the original Dataset
+
+```{r regressions1g, message=FALSE, fig.height=4, fig.width=5}
+
+# Load the dplyr package
+library(dplyr)
+
+# Calculate the mean of assessment_test grouped by assessment and type
+result <- educov %>%
+  group_by(ASSESSMENT_NAME) %>%
+  summarize(mean_score = mean(Gender_MEAN_SCORE, na.rm = TRUE))
+
+# View the result
+#print(result)
+
+# Load necessary packages
+library(ggplot2)
+
+ggplot(result, aes(x = ASSESSMENT_NAME, y = mean_score, 
+                   label = round(mean_score, 2),
+                   color = ASSESSMENT_NAME)) +
+  geom_point() +
+  geom_text(nudge_y = 10, size = 4, vjust = -0.5) +  
+  labs(title = "Mean Scores by Assessment Name",
+       x = "Assessment Name", y = "Mean Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  ylim(50, 650) +
+  coord_flip() +
+  scale_color_manual(values = c("black", "black", "black", "black", "black",
+                                "black", "black", "black", "black", "black",
+                                "black", "black", "red", "red"))+
+  guides(color = "none")
+```
+
+
+6.2 Zooming in on the Mean of Posterior Distributions for Science Assessments
+
+
+```{r regressions1h, message=FALSE, fig.height=3, fig.width=4}
+# Creating results matrix
+FE_matrix <- as.matrix(out_FE[[1]])
+total_obs <- nrow(educov)
+schools <- as.matrix(out_FE[[1]][, grep("b_school", colnames(out_FE[[1]]))])
+years <- as.matrix(out_FE[[1]][, grep("b_year", colnames(out_FE[[1]]))])
+assessments <- as.matrix(out_FE[[1]][, grep("b_assess", colnames(out_FE[[1]]))])
+
+# Females Post Covid
+post_pred_fpostc <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix[i,"b_0"]
+  b_female <- FE_matrix[i,"b_female"] * 1
+  b_postcovid <- FE_matrix[i,"b_postcovid"] * 1
+  b_female_postcovid <- FE_matrix[i,"b_female_postcovid"] * 1
+  b_racegap <- FE_matrix[i,"b_racegap"] * educov$race_gap[i]
+  b_ellgap <- FE_matrix[i,"b_ellgap"] * educov$ell_gap[i]
+  b_school <- schools[,educov$ENTITY_CD[i]]
+  b_year <- years[,educov$YEAR[i]]
+  b_assess <- assessments[,educov$ASSESSMENT_NAME[13]]
+  y_fpostc <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_fpostc[i] <- mean(y_fpostc)
+}
+
+# Females Post Covid
+post_pred_fprec <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix[i,"b_0"]
+  b_female <- FE_matrix[i,"b_female"] * 1
+  b_postcovid <- FE_matrix[i,"b_postcovid"] * 0
+  b_female_postcovid <- FE_matrix[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix[i,"b_racegap"] * educov$race_gap[i]
+  b_ellgap <- FE_matrix[i,"b_ellgap"] * educov$ell_gap[i]
+  b_school <- schools[,educov$ENTITY_CD[i]]
+  b_year <- years[,educov$YEAR[i]]
+  b_assess <- assessments[,educov$ASSESSMENT_NAME[13]]
+  y_fprec <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_fprec[i] <- mean(y_fprec)
+}
+
+```
+
+```{r regressions1i, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_post_pred_fpostc <- density(post_pred_fpostc)
+density_post_pred_fprec <- density(post_pred_fprec)
+
+
+# Calculate mean and quantiles for females post covid
+quantiles_post_pred_fpostc <- quantile(post_pred_fpostc, 
+                                       probs = c(0.025, 0.975))
+mean_post_pred_fpostc <- mean(post_pred_fpostc)
+
+# Calculate mean and quantiles for females pre covid
+quantiles_post_pred_fprec <- quantile(post_pred_fprec, probs = c(0.025, 0.975))
+mean_post_pred_fprec <- mean(post_pred_fprec)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_post_pred_fprec$x)
+x_max <- max(density_post_pred_fpostc$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_post_pred_fpostc, 
+     main="Females Posterior Distribution for Science4",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim = c(0, 0.1))
+
+lines(density_post_pred_fprec, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_post_pred_fpostc, col = "red", lty = 1) 
+abline(v = quantiles_post_pred_fpostc, col = "red", lty = 4)
+
+abline(v = mean_post_pred_fprec, col = "blue", lty = 1) 
+abline(v = quantiles_post_pred_fprec, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Females Post Covid", "Females Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_post_pred_fpostc - 0.17 * (x_max - x_min), 
+     max(density_post_pred_fpostc$y) - 0.001, 
+     paste("Mean (Post Covid):", 
+           round(mean_post_pred_fpostc, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_pred_fprec - 0.22 * (x_max - x_min), 
+     max(density_post_pred_fprec$y) - 0.0032, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_pred_fprec, 2)), col = "blue", , cex = 0.8)
+```
+
+
+```{r regressions1j, message=FALSE, fig.height=3, fig.width=4}
+
+# Males Post Covid
+post_pred_mpostc <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix[i,"b_0"]
+  b_female <- FE_matrix[i,"b_female"] * 0
+  b_postcovid <- FE_matrix[i,"b_postcovid"] * 1
+  b_female_postcovid <- FE_matrix[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix[i,"b_racegap"] * educov$race_gap[i]
+  b_ellgap <- FE_matrix[i,"b_ellgap"] * educov$ell_gap[i]
+  b_school <- schools[,educov$ENTITY_CD[i]]
+  b_year <- years[,educov$YEAR[i]]
+  b_assess <- assessments[,educov$ASSESSMENT_NAME[13]]
+  y_mpostc <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_mpostc[i] <- mean(y_mpostc)
+}
+
+# Males Post Covid
+post_pred_mprec <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix[i,"b_0"]
+  b_female <- FE_matrix[i,"b_female"] * 0
+  b_postcovid <- FE_matrix[i,"b_postcovid"] * 0
+  b_female_postcovid <- FE_matrix[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix[i,"b_racegap"] * educov$race_gap[i]
+  b_ellgap <- FE_matrix[i,"b_ellgap"] * educov$ell_gap[i]
+  b_school <- schools[,educov$ENTITY_CD[i]]
+  b_year <- years[,educov$YEAR[i]]
+  b_assess <- assessments[,educov$ASSESSMENT_NAME[13]]
+  y_mprec <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_mprec[i] <- mean(y_mprec)
+}
+
+```
+
+```{r regressions1k, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_post_pred_mpostc <- density(post_pred_mpostc)
+density_post_pred_mprec <- density(post_pred_mprec)
+
+# Calculate mean and quantiles for Males post covid
+quantiles_post_pred_mpostc <- quantile(post_pred_mpostc, 
+                                       probs = c(0.025, 0.975))
+mean_post_pred_mpostc <- mean(post_pred_mpostc)
+
+# Calculate mean and quantiles for Males pre covid
+quantiles_post_pred_mprec <- quantile(post_pred_mprec, 
+                                      probs = c(0.025, 0.975))
+mean_post_pred_mprec <- mean(post_pred_mprec)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_post_pred_mprec$x)
+x_max <- max(density_post_pred_mprec$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_post_pred_mpostc, 
+     main="Males Posterior Distribution for Science4",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim = c(0, 0.1))
+
+lines(density_post_pred_mprec, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_post_pred_mpostc, col = "red", lty = 1) 
+abline(v = quantiles_post_pred_mpostc, col = "red", lty = 4)
+
+abline(v = mean_post_pred_mprec, col = "blue", lty = 1) 
+abline(v = quantiles_post_pred_mprec, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Males Post Covid", "Males Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_post_pred_mpostc - 0.02 * (x_max - x_min), 
+     max(density_post_pred_mpostc$y), 
+     paste("Mean (Post Covid):", 
+           round(mean_post_pred_mpostc, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_pred_mprec - 0.02 * (x_max - x_min), 
+     max(density_post_pred_mprec$y) - 0.0002, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_pred_mprec, 2)), col = "blue", , cex = 0.8)
+
+```
+
+7. Mean of Posterior Distributions for Females and Males (Pre-Covid and Post-Covid)
+
+
+```{r regressions1l, message=FALSE, fig.height=3, fig.width=4}
+# Creating results matrix
+FE_matrix <- as.matrix(out_FE[[1]])
+total_obs <- nrow(educov)
+schools <- as.matrix(out_FE[[1]][, grep("b_school", colnames(out_FE[[1]]))])
+years <- as.matrix(out_FE[[1]][, grep("b_year", colnames(out_FE[[1]]))])
+assessments <- as.matrix(out_FE[[1]][, grep("b_assess", colnames(out_FE[[1]]))])
+
+# Females Post Covid
+post_pred_fpostc <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix[i,"b_0"]
+  b_female <- FE_matrix[i,"b_female"] * 1
+  b_postcovid <- FE_matrix[i,"b_postcovid"] * 1
+  b_female_postcovid <- FE_matrix[i,"b_female_postcovid"] * 1
+  b_racegap <- FE_matrix[i,"b_racegap"] * educov$race_gap[i]
+  b_ellgap <- FE_matrix[i,"b_ellgap"] * educov$ell_gap[i]
+  b_school <- schools[,educov$ENTITY_CD[i]]
+  b_year <- years[,educov$YEAR[i]]
+  b_assess <- assessments[,educov$ASSESSMENT_NAME[i]]
+  y_fpostc <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_fpostc[i] <- mean(y_fpostc)
+}
+
+# Females Post Covid
+post_pred_fprec <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix[i,"b_0"]
+  b_female <- FE_matrix[i,"b_female"] * 1
+  b_postcovid <- FE_matrix[i,"b_postcovid"] * 0
+  b_female_postcovid <- FE_matrix[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix[i,"b_racegap"] * educov$race_gap[i]
+  b_ellgap <- FE_matrix[i,"b_ellgap"] * educov$ell_gap[i]
+  b_school <- schools[,educov$ENTITY_CD[i]]
+  b_year <- years[,educov$YEAR[i]]
+  b_assess <- assessments[,educov$ASSESSMENT_NAME[i]]
+  y_fprec <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_fprec[i] <- mean(y_fprec)
+}
+
+```
+
+```{r regressions1m, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_post_pred_fpostc <- density(post_pred_fpostc)
+density_post_pred_fprec <- density(post_pred_fprec)
+
+
+# Calculate mean and quantiles for females post covid
+quantiles_post_pred_fpostc <- quantile(post_pred_fpostc, 
+                                       probs = c(0.025, 0.975))
+mean_post_pred_fpostc <- mean(post_pred_fpostc)
+
+# Calculate mean and quantiles for females pre covid
+quantiles_post_pred_fprec <- quantile(post_pred_fprec, probs = c(0.025, 0.975))
+mean_post_pred_fprec <- mean(post_pred_fprec)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_post_pred_fprec$x)
+x_max <- max(density_post_pred_fpostc$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_post_pred_fpostc, 
+     main="Females Posterior Distribution Pre and Post COVID",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim = c(0, 0.06))
+
+lines(density_post_pred_fprec, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_post_pred_fpostc, col = "red", lty = 1) 
+abline(v = quantiles_post_pred_fpostc, col = "red", lty = 4)
+
+abline(v = mean_post_pred_fprec, col = "blue", lty = 1) 
+abline(v = quantiles_post_pred_fprec, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Females Post Covid", "Females Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_post_pred_fpostc - 0.185 * (x_max - x_min), 
+     max(density_post_pred_fpostc$y), 
+     paste("Mean (Post Covid):", 
+           round(mean_post_pred_fpostc, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_pred_fprec - 0.185 * (x_max - x_min), 
+     max(density_post_pred_fprec$y) - 0.0012, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_pred_fprec, 2)), col = "blue", , cex = 0.8)
+```
+
+```{r regressions1n, message=FALSE, fig.height=3, fig.width=4}
+
+# Males Post Covid
+post_pred_mpostc <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix[i,"b_0"]
+  b_female <- FE_matrix[i,"b_female"] * 0
+  b_postcovid <- FE_matrix[i,"b_postcovid"] * 1
+  b_female_postcovid <- FE_matrix[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix[i,"b_racegap"] * educov$race_gap[i]
+  b_ellgap <- FE_matrix[i,"b_ellgap"] * educov$ell_gap[i]
+  b_school <- schools[,educov$ENTITY_CD[i]]
+  b_year <- years[,educov$YEAR[i]]
+  b_assess <- assessments[,educov$ASSESSMENT_NAME[i]]
+  y_mpostc <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_mpostc[i] <- mean(y_mpostc)
+}
+
+# Males Post Covid
+post_pred_mprec <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix[i,"b_0"]
+  b_female <- FE_matrix[i,"b_female"] * 0
+  b_postcovid <- FE_matrix[i,"b_postcovid"] * 0
+  b_female_postcovid <- FE_matrix[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix[i,"b_racegap"] * educov$race_gap[i]
+  b_ellgap <- FE_matrix[i,"b_ellgap"] * educov$ell_gap[i]
+  b_school <- schools[,educov$ENTITY_CD[i]]
+  b_year <- years[,educov$YEAR[i]]
+  b_assess <- assessments[,educov$ASSESSMENT_NAME[i]]
+  y_mprec <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_mprec[i] <- mean(y_mprec)
+}
+
+```
+
+```{r regressions1o, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_post_pred_mpostc <- density(post_pred_mpostc)
+density_post_pred_mprec <- density(post_pred_mprec)
+
+# Calculate mean and quantiles for Males post covid
+quantiles_post_pred_mpostc <- quantile(post_pred_mpostc, 
+                                       probs = c(0.025, 0.975))
+mean_post_pred_mpostc <- mean(post_pred_mpostc)
+
+# Calculate mean and quantiles for Males pre covid
+quantiles_post_pred_mprec <- quantile(post_pred_mprec, 
+                                      probs = c(0.025, 0.975))
+mean_post_pred_mprec <- mean(post_pred_mprec)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_post_pred_mprec$x)
+x_max <- max(density_post_pred_mpostc$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_post_pred_mpostc, 
+     main="Males Posterior Distribution Pre and Post COVID",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim= c(0,0.06 ))
+
+lines(density_post_pred_mprec, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_post_pred_mpostc, col = "red", lty = 1) 
+abline(v = quantiles_post_pred_mpostc, col = "red", lty = 4)
+
+abline(v = mean_post_pred_mprec, col = "blue", lty = 1) 
+abline(v = quantiles_post_pred_mprec, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Males Post Covid", "Males Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_post_pred_mpostc - 0.2 * (x_max - x_min), 
+     max(density_post_pred_mpostc$y), 
+     paste("Mean (Post Covid):", 
+           round(mean_post_pred_mpostc, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_pred_mprec - 0.22 * (x_max - x_min), 
+     max(density_post_pred_mprec$y) - 0.002, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_pred_mprec, 2)), col = "blue", , cex = 0.8)
+
+```
+
+## Model 2: Fixed Effects Model (without Science Assessments)
+
+1. Data Setup - excluding science assessmnets
+
+
+```{r regressions11a, results="hide", message=FALSE}
+
+
+library(dplyr)
+
+# Filtering rows where ASSESSMENT_NAME is not equal to 'science8' or 'science4'
+
+educov2 <- subset(educov, 
+                           !(ASSESSMENT_NAME %in% c("Science8", "Science4")))
+
+educov2$ASSESSMENT_NAME <- droplevels(educov2$ASSESSMENT_NAME)
+
+
+
+# Preview the filtered dataset
+head(educov2)
+```
+
+```{r regressions11b, message=FALSE, fig.height=4, fig.width=5}
+
+# Load the dplyr package
+library(dplyr)
+
+# Calculate the mean of assessment_test grouped by assessment and type
+result <- educov2 %>%
+  group_by(ASSESSMENT_NAME) %>%
+  summarize(mean_score = mean(Gender_MEAN_SCORE, na.rm = TRUE))
+
+# View the result
+#print(result)
+
+# Load necessary packages
+library(ggplot2)
+
+ggplot(result, aes(x = ASSESSMENT_NAME, y = mean_score, 
+                   label = round(mean_score, 2),
+                   color = ASSESSMENT_NAME)) +
+  geom_point() +
+  geom_text(nudge_y = 10, size = 4, vjust = -0.5) +  # Adding labels near points
+  labs(title = "Mean Scores by Assessment Name",
+       x = "Assessment Name", y = "Mean Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  # Rotate x-axis labels if needed
+  ylim(50, 650) +
+  coord_flip() +
+  scale_color_manual(values = c("black", "black", "black", "black", "black",
+                                "black", "black", "black", "black", "black",
+                                "black", "black", "red", "red"))+
+  guides(color = "none")
+```
+
+```{r regressions11c, results="hide", message=FALSE}
+
+# Convert to a factor
+educov2$ASSESSMENT_NAME <- as.factor(educov2$ASSESSMENT_NAME)
+educov2$ENTITY_CD <- as.factor(educov2$ENTITY_CD)
+educov2$YEAR <- as.factor(educov2$YEAR)
+
+jags.data2 <- list(
+  Gender_MEAN_SCORE = educov2$Gender_MEAN_SCORE,
+  Female = educov2$Female,
+  post_covid = educov2$post_covid,
+  race_gap = educov2$race_gap,
+  ell_gap = educov2$ell_gap,
+  ENTITY_CD = educov2$ENTITY_CD,
+  YEAR = educov2$YEAR,
+  ASSESSMENT_NAME = educov2$ASSESSMENT_NAME,
+  N = nrow(educov2), 
+  unique_schools = length(unique(educov2$ENTITY_CD)),
+  unique_assessments = length(unique(educov2$ASSESSMENT_NAME)),
+  unique_years = length(unique(educov2$YEAR))
+)
+  
+```
+
+
+2. Model Setup
+
+```{r regressions11d, results="hide", message=FALSE}
+# Model specification in JAGS
+model_FE2 <- "model {
+  for (i in 1:N) {
+    Gender_MEAN_SCORE[i] ~ dnorm(mu[i], tau)
+    mu[i] <- b_0+ b_female*Female[i] + b_postcovid*post_covid[i] + 
+              b_racegap*race_gap[i] + b_ellgap*ell_gap[i] +
+              b_school[ENTITY_CD[i]] + b_year[YEAR[i]]  +
+              b_assess[ASSESSMENT_NAME[i]] + 
+              b_female_postcovid * Female[i] * post_covid[i]
+  }
+  
+  # Priors for coefficients
+  b_0 ~ dnorm(0, 0.001)
+  b_female ~ dnorm(0, 0.001)
+  b_postcovid ~ dnorm(0, 0.001)
+  b_racegap ~ dnorm(0, 0.001)
+  b_ellgap ~ dnorm(0, 0.001)
+  b_female_postcovid ~ dnorm(0, 0.001)
+  
+   # School effects
+  for (i in 1:unique_schools) {
+    b_school[i] ~ dnorm(0, 0.001)
+  }
+  
+  # Year effects
+  for (i in 1:unique_years) {
+    b_year[i] ~ dnorm(0, 0.001)
+  }
+
+  # Assessment effects
+  for (i in 1:unique_assessments) {
+    b_assess[i] ~ dnorm(0, 0.001)
+  }
+  
+  tau ~ dgamma(0.001, 0.001) ## (inverse) Variance
+  sigma2 <- 1 / tau
+}"
+
+write(model_FE2,file="educov_FE2.jags")
+
+```
+
+
+3. Run the Model
+
+
+```{r regressions11e, results="hide", message=FALSE}
+# Run Model
+mod_FE2 <- jags.model(file = "educov_FE2.jags",
+                    data = jags.data2, n.chains = 1)
+update(mod_FE2, 10000)
+out_FE2 <- coda.samples(model = mod_FE2,
+  variable.names = c("b_0", "b_female", "b_postcovid","b_racegap",
+                     "b_ellgap", "b_female_postcovid", "b_year", 
+                     "b_school", "b_assess", "sigma2"),
+  n.iter = 20000
+)
+
+```
+
+4. Summary Results
+
+
+```{r regressions11f, message=FALSE}
+summary(out_FE2)
+
+```
+
+5. Coefficient Plot
+
+```{r regressions11g,  message=FALSE}
+
+# Creating results matrix
+FE_matrix2 <- as.matrix(out_FE2[[1]])
+
+# Calculate the mean of each column
+means <- apply(FE_matrix2, 2, mean)
+quantile_2_5 <- apply(FE_matrix2, 2, function(x) quantile(x, 0.025))
+quantile_97_5 <- apply(FE_matrix2, 2, function(x) quantile(x, 0.975))
+
+# Convert data to a dataframe
+FE_df2 <- data.frame(variable = colnames(FE_matrix2),
+                            mean_value = means,
+                            quantile_2_5 = quantile_2_5,
+                            quantile_97_5 = quantile_97_5)
+
+```
+
+
+```{r regressions11h, message=FALSE, fig.height=3, fig.width=4}
+variables_of_interest <- c("b_female_postcovid", "b_female")
+subset_FE_df2 <- FE_df2[FE_df2$variable %in% variables_of_interest, ]
+
+# Define colors for specific variables
+#subset_FE_df2$color <- ifelse(subset_FE_df2$variable %in% 
+ #                              c("b_female", "b_female_postcovid"), 
+  #                           "blue", "grey")
+
+# Load the dplyr package
+library(dplyr)
+
+# Define the desired order
+desired_order <- c("b_female", "b_female_postcovid")
+
+# Convert the 'variable' column to a factor with desired order
+subset_FE_df2$variable <- factor(subset_FE_df2$variable, levels = desired_order)
+
+# Sort the data frame by the 'variable' column
+sorted_data2 <- subset_FE_df2 %>%
+  arrange(variable)
+
+# Plotting the means using ggplot2
+library(ggplot2)
+
+ggplot(sorted_data2, aes(x = variable, y = mean_value)) +
+  geom_point(size = 2, position = position_dodge(width = 0.5), shape = 21) + 
+  geom_errorbar(aes(ymin = quantile_2_5, ymax = quantile_97_5), width = 0.2, 
+                position = position_dodge(width = 0.5)) +  
+  geom_text(aes(label = round(mean_value, 2)), 
+            position = position_dodge(width = 0.5), 
+            vjust = -0.5, size = 3, color = "black") +
+  labs(title = "Coefficient Plot for Bayesian Fixed Effects Model",
+       x = "Estimate",
+       y = "Coefficient") +
+  coord_flip() +
+  scale_fill_manual(values = c("blue" = "blue", "grey" = "grey")) +
+  theme(panel.background = element_rect(fill = "white"),
+        panel.border = element_rect(color = "black", fill = NA),
+        panel.grid = element_blank(), 
+        plot.title = element_text(hjust = 0.5, size = 10),
+        axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        legend.position = "none",
+        axis.title.x = element_text(size = 8),  
+        axis.title.y = element_text(size = 8)
+        ) +
+  guides(fill = guide_legend(reverse = FALSE))
+  
+```
+
+
+6. Mean of Posterior Distributions for Females and Males (Pre-Covid and Post-Covid)
+
+
+
+```{r regressions11i, message=FALSE, fig.height=3, fig.width=4}
+# Creating results matrix
+FE_matrix2 <- as.matrix(out_FE2[[1]])
+total_obs <- nrow(educov2)
+schools <- as.matrix(out_FE2[[1]][, grep("b_school", colnames(out_FE2[[1]]))])
+years <- as.matrix(out_FE2[[1]][, grep("b_year", colnames(out_FE2[[1]]))])
+assessments <- as.matrix(out_FE2[[1]][, grep("b_assess", colnames(out_FE2[[1]]))])
+
+# Females Post Covid
+post_pred_fpostc <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix2[i,"b_0"]
+  b_female <- FE_matrix2[i,"b_female"] * 1
+  b_postcovid <- FE_matrix2[i,"b_postcovid"] * 1
+  b_female_postcovid <- FE_matrix2[i,"b_female_postcovid"] * 1
+  b_racegap <- FE_matrix2[i,"b_racegap"] * educov2$race_gap[i]
+  b_ellgap <- FE_matrix2[i,"b_ellgap"] * educov2$ell_gap[i]
+  b_school <- schools[,educov2$ENTITY_CD[i]]
+  b_year <- years[,educov2$YEAR[i]]
+  b_assess <- assessments[,educov2$ASSESSMENT_NAME[i]]
+  y_fpostc <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_fpostc[i] <- mean(y_fpostc)
+}
+
+# Females Post Covid
+post_pred_fprec <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix2[i,"b_0"]
+  b_female <- FE_matrix2[i,"b_female"] * 1
+  b_postcovid <- FE_matrix2[i,"b_postcovid"] * 0
+  b_female_postcovid <- FE_matrix2[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix2[i,"b_racegap"] * educov2$race_gap[i]
+  b_ellgap <- FE_matrix2[i,"b_ellgap"] * educov2$ell_gap[i]
+  b_school <- schools[,educov2$ENTITY_CD[i]]
+  b_year <- years[,educov2$YEAR[i]]
+  b_assess <- assessments[,educov2$ASSESSMENT_NAME[i]]
+  y_fprec <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_fprec[i] <- mean(y_fprec)
+}
+
+```
+
+```{r regressions11j, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_post_pred_fpostc <- density(post_pred_fpostc)
+density_post_pred_fprec <- density(post_pred_fprec)
+
+
+# Calculate mean and quantiles for females post covid
+quantiles_post_pred_fpostc <- quantile(post_pred_fpostc, 
+                                       probs = c(0.025, 0.975))
+mean_post_pred_fpostc <- mean(post_pred_fpostc)
+
+# Calculate mean and quantiles for females pre covid
+quantiles_post_pred_fprec <- quantile(post_pred_fprec, probs = c(0.025, 0.975))
+mean_post_pred_fprec <- mean(post_pred_fprec)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_post_pred_fpostc$x)
+x_max <- max(density_post_pred_fprec$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_post_pred_fpostc, 
+     main="Females Posterior Distribution Pre and Post COVID",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim = c(0, 0.14))
+
+lines(density_post_pred_fprec, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_post_pred_fpostc, col = "red", lty = 1) 
+abline(v = quantiles_post_pred_fpostc, col = "red", lty = 4)
+
+abline(v = mean_post_pred_fprec, col = "blue", lty = 1) 
+abline(v = quantiles_post_pred_fprec, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Females Post Covid", "Females Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_post_pred_fpostc + 0.2 * (x_max - x_min), 
+     max(density_post_pred_fpostc$y), 
+     paste("Mean (Post Covid):", 
+           round(mean_post_pred_fpostc, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_pred_fprec + 0.2 * (x_max - x_min), 
+     max(density_post_pred_fprec$y) - 0.0012, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_pred_fprec, 2)), col = "blue", , cex = 0.8)
+```
+
+```{r regressions11k, message=FALSE, fig.height=3, fig.width=4}
+
+# Males Post Covid
+post_pred_mpostc <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix2[i,"b_0"]
+  b_female <- FE_matrix2[i,"b_female"] * 0
+  b_postcovid <- FE_matrix2[i,"b_postcovid"] * 1
+  b_female_postcovid <- FE_matrix2[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix2[i,"b_racegap"] * educov2$race_gap[i]
+  b_ellgap <- FE_matrix2[i,"b_ellgap"] * educov2$ell_gap[i]
+  b_school <- schools[,educov2$ENTITY_CD[i]]
+  b_year <- years[,educov2$YEAR[i]]
+  b_assess <- assessments[,educov2$ASSESSMENT_NAME[i]]
+  y_mpostc <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_mpostc[i] <- mean(y_mpostc)
+}
+
+# Males Post Covid
+post_pred_mprec <- numeric(total_obs)
+for (i in 1:total_obs) {
+  b_0 <- FE_matrix2[i,"b_0"]
+  b_female <- FE_matrix2[i,"b_female"] * 0
+  b_postcovid <- FE_matrix2[i,"b_postcovid"] * 0
+  b_female_postcovid <- FE_matrix2[i,"b_female_postcovid"] * 0
+  b_racegap <- FE_matrix2[i,"b_racegap"] * educov2$race_gap[i]
+  b_ellgap <- FE_matrix2[i,"b_ellgap"] * educov2$ell_gap[i]
+  b_school <- schools[,educov2$ENTITY_CD[i]]
+  b_year <- years[,educov2$YEAR[i]]
+  b_assess <- assessments[,educov2$ASSESSMENT_NAME[i]]
+  y_mprec <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  post_pred_mprec[i] <- mean(y_mprec)
+}
+
+```
+
+```{r regressions11l, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_post_pred_mpostc <- density(post_pred_mpostc)
+density_post_pred_mprec <- density(post_pred_mprec)
+
+# Calculate mean and quantiles for Males post covid
+quantiles_post_pred_mpostc <- quantile(post_pred_mpostc, 
+                                       probs = c(0.025, 0.975))
+mean_post_pred_mpostc <- mean(post_pred_mpostc)
+
+# Calculate mean and quantiles for Males pre covid
+quantiles_post_pred_mprec <- quantile(post_pred_mprec, 
+                                      probs = c(0.025, 0.975))
+mean_post_pred_mprec <- mean(post_pred_mprec)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_post_pred_mpostc$x)
+x_max <- max(density_post_pred_mprec$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_post_pred_mpostc, 
+     main="Males Posterior Distribution Pre and Post COVID",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim= c(0,0.14 ))
+
+lines(density_post_pred_mprec, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_post_pred_mpostc, col = "red", lty = 1) 
+abline(v = quantiles_post_pred_mpostc, col = "red", lty = 4)
+
+abline(v = mean_post_pred_mprec, col = "blue", lty = 1) 
+abline(v = quantiles_post_pred_mprec, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Males Post Covid", "Males Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_post_pred_mpostc - 0.2 * (x_max - x_min), 
+     max(density_post_pred_mpostc$y), 
+     paste("Mean (Post Covid):", 
+           round(mean_post_pred_mpostc, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_pred_mprec - 0.22 * (x_max - x_min), 
+     max(density_post_pred_mprec$y) - 0.002, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_pred_mprec, 2)), col = "blue", , cex = 0.8)
+
+```
+
+
+## Model 3: Hierarchical Model
+
+
+1. Data Setup
+
+
+```{r regressions2a, results="hide", message=FALSE}
+# Load the dplyr package
+library(dplyr)
+
+# Filtering rows where ASSESSMENT_NAME is not equal to 'science8' or 'science4'
+
+educov2 <- subset(educov, 
+                           !(ASSESSMENT_NAME %in% c("Science8", "Science4")))
+
+educov2$ASSESSMENT_NAME <- droplevels(educov2$ASSESSMENT_NAME)
+
+# Convert to a factor
+educov2$ASSESSMENT_NAME <- as.factor(educov2$ASSESSMENT_NAME)
+educov2$ENTITY_CD <- as.factor(educov2$ENTITY_CD)
+educov2$YEAR <- as.factor(educov2$YEAR)
+
+jags.data2 <- list(
+  Gender_MEAN_SCORE = educov2$Gender_MEAN_SCORE,
+  Female = educov2$Female,
+  post_covid = educov2$post_covid,
+  race_gap = educov2$race_gap,
+  ell_gap = educov2$ell_gap,
+  ENTITY_CD = educov2$ENTITY_CD,
+  YEAR = educov2$YEAR,
+  ASSESSMENT_NAME = educov2$ASSESSMENT_NAME,
+  N = nrow(educov2), 
+  unique_schools = length(unique(educov2$ENTITY_CD)),
+  unique_assessments = length(unique(educov2$ASSESSMENT_NAME)),
+  unique_years = length(unique(educov2$YEAR))
+)
+  
+jags.data2$V = diag(4)
+jags.data2$df = 5
+```
+
+2. Model Setup
+
+```{r regressions2b, results="hide", message=FALSE}
+
+# Model specification in JAGS
+model_H <- "model {
+  for (i in 1:N) {
+    Gender_MEAN_SCORE[i] ~ dnorm(mu[i], tau.y)
+    mu[i] <- b_0 + r_female[ENTITY_CD[i]]*Female[i] + 
+              r_postcovid[ENTITY_CD[i]]*post_covid[i] + 
+              b_racegap*race_gap[i] + b_ellgap*ell_gap[i] +
+              b_school[ENTITY_CD[i]] + b_year[YEAR[i]]  +
+              b_assess[ASSESSMENT_NAME[i]] + 
+              r_femalepostcovid[ENTITY_CD[i]] * Female[i] * post_covid[i]
+  }
+  
+  # Priors for coefficients
+  b_0 ~ dnorm(0, 0.001)
+  b_racegap ~ dnorm(0, 0.001)
+  b_ellgap ~ dnorm(0, 0.001)
+
+  tau.y <- 1 / (sigma.y^2)
+  sigma.y ~ dunif(0, 100)
+
+  
+  # Year effects
+  for (i in 1:unique_years) {
+    b_year[i] ~ dnorm(0, 0.001)
+
+  }
+
+  # Assessment effects
+  for (i in 1:unique_assessments) {
+    b_assess[i] ~ dnorm(0, 0.001)
+  }
+  
+  for (n in 1:unique_schools) {
+    b_school[n] <- B[n,1]
+    r_female[n] <- B[n,2]
+    r_postcovid[n] <- B[n,3]
+    r_femalepostcovid[n] <- B[n,4]
+    
+    B[n,1:4] ~ dmnorm(Mu.B[n,], Tau.B[,])
+    Mu.B[n,1] <- mu.school
+    Mu.B[n,2] <- mu.female
+    Mu.B[n,3] <- mu.postcovid
+    Mu.B[n,4] <- mu.femalepostcovid
+  }
+  
+  mu.school ~ dnorm(0, 0.001)
+  mu.female ~ dnorm(0, 0.001)
+  mu.postcovid ~ dnorm(0, 0.001)
+  mu.femalepostcovid ~ dnorm(0, 0.001)
+  
+  
+  Tau.B[1:4,1:4] ~ dwish(V[,], df)
+  Sigma.B <- inverse(Tau.B)
+  
+  sigma.school <- sqrt(Sigma.B[1,1])
+  sigma.female <- sqrt(Sigma.B[2,2])
+  sigma.postcovid <- sqrt(Sigma.B[3,3])
+  sigma.femalepostcovid <- sqrt(Sigma.B[4,4])
+  
+}"
+
+write(model_H,file="educov_H.jags")
+
+```
+
+3. Run the Model
+
+```{r regressions2c, results="hide", message=FALSE}
+# Run Model
+mod_H <- jags.model(file = "educov_H.jags",
+                    data = jags.data2, n.chains = 1)
+update(mod_H, 10000)
+out_H <- coda.samples(model = mod_H,
+  variable.names = c("b_0", "r_female", "r_postcovid","b_racegap",
+                     "b_ellgap", "r_femalepostcovid", "b_year", 
+                     "b_school", "b_assess", "mu.school", 
+                     "mu.female", "mu.postcovid", "mu.femalepostcovid",
+                     "sigma.y", "sigma.school", "sigma.postcovid",
+                     "sigma.femalepostcovid"),
+  n.iter = 20000
+)
+
+```
+
+4. Summary Results
+
+```{r regressions2d, message=FALSE}
+summary(out_H)
+```
+
+
+5. Plotting b_school from Hierarchical and Fixed Effects Models
+
+```{r regressions2e, message=FALSE, fig.height=3, fig.width=4}
+
+schools_H <- as.matrix(out_H[[1]][, grep("b_school", colnames(out_H[[1]]))])
+schools_FE <- as.matrix(out_FE2[[1]][, grep("b_school", colnames(out_FE2[[1]]))])
+
+# Calculate mean 
+mean_schools_H <- colMeans(schools_H)
+mean_schools_FE <- colMeans(schools_FE)
+
+#mean_schools_H <- apply(schools_H, 2, median)
+#mean_schools_FE <- apply(schools_FE, 2, median)
+
+# Calculate quantiles
+quantile_2p5_H <- apply(schools_H, 2, quantile, probs = 0.025)
+quantile_97p5_H <- apply(schools_H, 2, quantile, probs = 0.975)
+
+quantile_2p5_FE <- apply(schools_FE, 2, quantile, probs = 0.025)
+quantile_97p5_FE <- apply(schools_FE, 2, quantile, probs = 0.975)
+
+
+# Determine overall min and max for the plot limits
+overall_min <- min(c(mean_schools_H, mean_schools_FE, quantile_2p5_H, quantile_97p5_H, quantile_2p5_FE, quantile_97p5_FE))
+overall_max <- max(c(mean_schools_H, mean_schools_FE, quantile_2p5_H, quantile_97p5_H, quantile_2p5_FE, quantile_97p5_FE))
+
+
+# Set width for displaying points side by side
+width <- 0.3
+y_axis_limit <- 320
+
+# Create an empty plot
+plot(1:length(mean_schools_H), mean_schools_H, type = "n", xlab = "Schools", ylab = "Mean Test Score",
+     main = "Mean Test Scores by School", ylim = c(overall_min, y_axis_limit))
+
+# Add points for mean values for both schools_H and schools_FE with adjusted x-axis positions
+points(1:length(mean_schools_H) - width/2, mean_schools_H, col = "blue", pch = 19)
+points(1:length(mean_schools_FE) + width/2, mean_schools_FE, col = "red", pch = 19)
+
+for (i in 1:length(quantile_2p5_H)) {
+  segments(i - width/2, quantile_2p5_H[i], i - width/2, quantile_97p5_H[i], col = "blue")
+}
+
+for (i in 1:length(quantile_2p5_FE)) {
+  segments(i + width/2, quantile_2p5_FE[i], i + width/2, quantile_97p5_FE[i], col = "red")
+}
+
+# Set x-axis ticks to display numbers from 1 to 15
+ticks <- 1:15
+axis(1, at = ticks, labels = ticks)
+
+legend("topright", legend = c("Hierarchical", "Fixed Effects"),
+       col = c("blue", "red", "blue", "red"), pch = c(19, 19, NA, NA), lty = c(NA, NA, 1, 1),
+       cex = 0.7)
+```
+
+6. Pre-Covid and Post-Covid Mean Gender Effects (Effect of Gender Across Schools)
+
+
+```{r regressions2f, message=FALSE, fig.height=3, fig.width=4}
+schools_H <- as.matrix(out_H[[1]][, grep("b_school", colnames(out_H[[1]]))])
+
+mean_schools_H <- colMeans(schools_H)
+r_female_H <- as.matrix(out_H[[1]][, grep("r_female", 
+                                          colnames(out_H[[1]]))])
+mean_rfemale_H <- colMeans(r_female_H)
+
+r_postcovid_H <- as.matrix(out_H[[1]][, grep("r_postcovid", 
+                                             colnames(out_H[[1]]))])
+mean_r_postcovid_H <- colMeans(r_postcovid_H)
+
+r_femalepostcovid_H <- as.matrix(out_H[[1]][, grep("r_femalepostcovid", 
+                                                   colnames(out_H[[1]]))])
+mean_rfemalepostcovid_H <- colMeans(r_femalepostcovid_H)
+
+y_min <- min(c(mean_schools_H, mean_rfemale_H))
+y_max <-140
+
+# Set the lower limit for y-axis to start from 80
+y_start <- 100
+
+# Determine the range with padding above the maximum value
+padding <- 0.1  # Adjust the padding to leave some space above the data
+y_range <- c(max(y_start, y_min - padding), y_max + padding)
+
+
+# Initialize an empty plot before the loop
+plot(NA, xlim = c(0, 1.2), ylim = y_range, 
+     xlab = "Female", ylab = "Mean Value", 
+     main = "Pre-Covid Gender Mean Test Scores",
+     axes = FALSE)
+
+axis(1, at = c(0, 1), labels = c(0, 1))
+axis(2)
+
+# Generate a sequence of colors for each district
+#line_colors <- rainbow(jags.data$unique_schools)
+library(randomcoloR)
+n <- 15
+line_colors <- distinctColorPalette(n)
+
+# Loop through each district
+for (i in 1:jags.data$unique_schools) {
+  female_0 <- mean_schools_H[i]
+  female_1 <- mean_schools_H[i] + mean_rfemale_H[i] 
+  #+ mean_r_postcovid_H[i] + mean_rfemalepostcovid_H[i]
+  #print(paste("District", i, "Female 0:", female_0, "Female 1:", female_1))
+
+ # Plot points for female_0 and female_1
+  points(c(0, 1), c(female_0, female_1), type = "p", 
+         col = line_colors[i], cex = 1.5)
+  
+  lines(c(0, 1), c(female_0, female_1), col = line_colors[i], lwd = 2)
+}
+# Add a legend indicating the districts by number with smaller text
+legend("topright", legend = 1:jags.data$unique_schools, 
+       col = line_colors, pch = 1,
+       text.font = 3, cex = 0.7, ncol = 2)  
+  
+```
+
+```{r regressions2g, message=FALSE, fig.height=3, fig.width=4}
+
+y_min <- min(c(mean_schools_H, mean_rfemale_H))
+y_max <-140
+
+# Set the lower limit for y-axis to start from 80
+y_start <- 100
+
+# Determine the range with padding above the maximum value
+padding <- 0.1  # Adjust the padding to leave some space above the data
+y_range <- c(max(y_start, y_min - padding), y_max + padding)
+
+
+# Initialize an empty plot before the loop
+plot(NA, xlim = c(0, 1.2), ylim = y_range, 
+     xlab = "Female", ylab = "Mean Value", 
+     main = "Post-Covid Gender Mean Test Scores",
+     axes = FALSE)
+
+axis(1, at = c(0, 1), labels = c(0, 1))
+axis(2)
+
+
+# Loop through each district
+for (i in 1:jags.data$unique_schools) {
+  female_0 <- mean_schools_H[i] + mean_r_postcovid_H[i]
+  female_1 <- mean_schools_H[i] + mean_rfemale_H[i] + mean_r_postcovid_H[i] 
+  + mean_rfemalepostcovid_H[i]
+  
+  #print(paste("District", i, "Female 0:", female_0, "Female 1:", female_1))
+
+ # Plot points for female_0 and female_1
+  points(c(0, 1), c(female_0, female_1), type = "p", 
+         col = line_colors[i], cex = 1.5)
+  
+  lines(c(0, 1), c(female_0, female_1), col = line_colors[i], lwd = 2)
+}
+# Add a legend indicating the districts by number with smaller text
+legend("topright", legend = 1:jags.data$unique_schools, 
+       col = line_colors, pch = 1,
+       text.font = 3, cex = 0.7, ncol = 2)  
+  
+```
+
+7. Mean of Posterior Distributions for Females and Males (Pre-Covid and Post-Covid)
+
+7.1 School 6 (Highest Performing)
+
+
+```{r regressions2h, message=FALSE, fig.height=3, fig.width=4}
+# Creating results matrix
+H_matrix <- as.matrix(out_H[[1]])
+
+# Subset data for the selected state
+selected_school <- 6
+data_for_selected_school <- educov2[educov2$ENTITY_CD == selected_school,]
+total_obs_6 <- nrow(data_for_selected_school)
+
+schools <- as.matrix(out_H[[1]][, grep("b_school", 
+                                       colnames(out_H[[1]]))])
+years <- as.matrix(out_H[[1]][, grep("b_year", 
+                                     colnames(out_H[[1]]))])
+assessments <- as.matrix(out_H[[1]][, grep("b_assess", 
+                                           colnames(out_H[[1]]))])
+females <- as.matrix(out_H[[1]][, grep("r_female", 
+                                       colnames(out_H[[1]]))])
+postcovid <- as.matrix(out_H[[1]][, grep("r_postcovid", 
+                                         colnames(out_H[[1]]))])
+femalepostcovid <- as.matrix(out_H[[1]][, grep("r_femalepostcovid", 
+                                               colnames(out_H[[1]]))])
+
+# Female Post-Covid
+fpost_pred_6_post <- numeric(total_obs_6)
+for (i in 1:total_obs_6) {
+  b_0 <- H_matrix[i,"b_0"]
+  b_female <- females[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_postcovid <- postcovid[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_female_postcovid <- femalepostcovid[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_racegap <- H_matrix[i,"b_racegap"] * data_for_selected_school$race_gap[i]
+  b_ellgap <- H_matrix[i,"b_ellgap"] * data_for_selected_school$ell_gap[i]
+  b_school <- schools[,data_for_selected_school$ENTITY_CD[i]]
+  b_year <- years[,data_for_selected_school$YEAR[i]]
+  b_assess <- assessments[,data_for_selected_school$ASSESSMENT_NAME[i]]
+  fy_6_post <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  fpost_pred_6_post[i] <- mean(fy_6_post)
+}
+
+# Female Pre Covid
+fpost_pred_6_pre <- numeric(total_obs_6)
+for (i in 1:total_obs_6) {
+  b_0 <- H_matrix[i,"b_0"]
+  b_female <- females[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_postcovid <- postcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_female_postcovid <- femalepostcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_racegap <- H_matrix[i,"b_racegap"] * data_for_selected_school$race_gap[i]
+  b_ellgap <- H_matrix[i,"b_ellgap"] * data_for_selected_school$ell_gap[i]
+  b_school <- schools[,data_for_selected_school$ENTITY_CD[i]]
+  b_year <- years[,data_for_selected_school$YEAR[i]]
+  b_assess <- assessments[,data_for_selected_school$ASSESSMENT_NAME[i]]
+  fy_6_pre <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  fpost_pred_6_pre[i] <- mean(fy_6_pre)
+}
+
+```
+
+
+```{r regressions1i, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_f6_post <- density(fpost_pred_6_post)
+density_f6_pre <- density(fpost_pred_6_pre)
+
+
+# Calculate mean and quantiles for females post covid
+quantiles_f6_post <- quantile(fpost_pred_6_post, 
+                                       probs = c(0.025, 0.975))
+mean_f6_post <- mean(fpost_pred_6_post)
+
+# Calculate mean and quantiles for females pre covid
+quantiles_f6_pre <- quantile(fpost_pred_6_pre, probs = c(0.025, 0.975))
+mean_post_f6_pre <- mean(fpost_pred_6_pre)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_f6_post$x)
+x_max <- max(density_f6_pre$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_f6_post, 
+     main="Females Posterior Distribution for School 6",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim = c(0, 0.3))
+
+lines(density_f6_pre, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_f6_post, col = "red", lty = 1) 
+abline(v = quantiles_f6_post, col = "red", lty = 4)
+
+abline(v = mean_post_f6_pre, col = "blue", lty = 1) 
+abline(v = quantiles_f6_pre, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Females Post Covid", "Females Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_f6_post - 0.2 * (x_max - x_min), 
+     max(density_f6_post$y) - 0.03, 
+     paste("Mean (Post Covid):", 
+           round(mean_f6_post, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_f6_pre - 0.2 * (x_max - x_min), 
+     max(density_f6_pre$y) - 0.05, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_f6_pre, 2)), col = "blue", , cex = 0.8)
+```
+
+
+```{r regressions2j, message=FALSE, fig.height=3, fig.width=4}
+
+# Male Post-Covid
+mpost_pred_6_post <- numeric(total_obs_6)
+for (i in 1:total_obs_6) {
+  b_0 <- H_matrix[i,"b_0"]
+  b_female <- females[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_postcovid <- postcovid[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_female_postcovid <- femalepostcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_racegap <- H_matrix[i,"b_racegap"] * data_for_selected_school$race_gap[i]
+  b_ellgap <- H_matrix[i,"b_ellgap"] * data_for_selected_school$ell_gap[i]
+  b_school <- schools[,data_for_selected_school$ENTITY_CD[i]]
+  b_year <- years[,data_for_selected_school$YEAR[i]]
+  b_assess <- assessments[,data_for_selected_school$ASSESSMENT_NAME[i]]
+  my_6_post <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  mpost_pred_6_post[i] <- mean(my_6_post)
+}
+
+# Male Pre Covid
+mpost_pred_6_pre <- numeric(total_obs_6)
+for (i in 1:total_obs_6) {
+  b_0 <- H_matrix[i,"b_0"]
+  b_female <- females[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_postcovid <- postcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_female_postcovid <- femalepostcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_racegap <- H_matrix[i,"b_racegap"] * data_for_selected_school$race_gap[i]
+  b_ellgap <- H_matrix[i,"b_ellgap"] * data_for_selected_school$ell_gap[i]
+  b_school <- schools[,data_for_selected_school$ENTITY_CD[i]]
+  b_year <- years[,data_for_selected_school$YEAR[i]]
+  b_assess <- assessments[,data_for_selected_school$ASSESSMENT_NAME[i]]
+  my_6_pre <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  mpost_pred_6_pre[i] <- mean(my_6_pre)
+}
+
+```
+
+
+
+```{r regressions2k, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_m6_post <- density(mpost_pred_6_post)
+density_m6_pre <- density(mpost_pred_6_pre)
+
+# Calculate mean and quantiles for females post covid
+quantiles_m6_post <- quantile(mpost_pred_6_post, 
+                                       probs = c(0.025, 0.975))
+mean_m6_post <- mean(mpost_pred_6_post)
+
+# Calculate mean and quantiles for females pre covid
+quantiles_m6_pre <- quantile(mpost_pred_6_pre, probs = c(0.025, 0.975))
+mean_post_m6_pre <- mean(mpost_pred_6_pre)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_m6_post$x)
+x_max <- max(density_m6_pre$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_m6_post, 
+     main="Males Posterior Distribution for School 6",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim = c(0, 0.3))
+
+lines(density_m6_pre, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_m6_post, col = "red", lty = 1) 
+abline(v = quantiles_m6_post, col = "red", lty = 4)
+
+abline(v = mean_post_m6_pre, col = "blue", lty = 1) 
+abline(v = quantiles_m6_pre, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Males Post Covid", "Males Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_m6_post - 0.2 * (x_max - x_min), 
+     max(density_m6_post$y) - 0.03, 
+     paste("Mean (Post Covid):", 
+           round(mean_m6_post, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_m6_pre - 0.2 * (x_max - x_min), 
+     max(density_m6_pre$y) - 0.05, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_m6_pre, 2)), col = "blue", , cex = 0.8)
+```
+
+7.2 School 2 (Lowest Performing)
+
+
+```{r regressions2l, message=FALSE, fig.height=3, fig.width=4}
+# Creating results matrix
+H_matrix <- as.matrix(out_H[[1]])
+
+# Subset data for the selected state
+selected_school <- 2
+data_for_selected_school <- educov2[educov2$ENTITY_CD == selected_school,]
+total_obs_6 <- nrow(data_for_selected_school)
+
+schools <- as.matrix(out_H[[1]][, grep("b_school", 
+                                       colnames(out_H[[1]]))])
+years <- as.matrix(out_H[[1]][, grep("b_year", 
+                                     colnames(out_H[[1]]))])
+assessments <- as.matrix(out_H[[1]][, grep("b_assess", 
+                                           colnames(out_H[[1]]))])
+females <- as.matrix(out_H[[1]][, grep("r_female", 
+                                       colnames(out_H[[1]]))])
+postcovid <- as.matrix(out_H[[1]][, grep("r_postcovid", 
+                                         colnames(out_H[[1]]))])
+femalepostcovid <- as.matrix(out_H[[1]][, grep("r_femalepostcovid", 
+                                               colnames(out_H[[1]]))])
+
+# Female Post-Covid
+fpost_pred_6_post <- numeric(total_obs_6)
+for (i in 1:total_obs_6) {
+  b_0 <- H_matrix[i,"b_0"]
+  b_female <- females[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_postcovid <- postcovid[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_female_postcovid <- femalepostcovid[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_racegap <- H_matrix[i,"b_racegap"] * data_for_selected_school$race_gap[i]
+  b_ellgap <- H_matrix[i,"b_ellgap"] * data_for_selected_school$ell_gap[i]
+  b_school <- schools[,data_for_selected_school$ENTITY_CD[i]]
+  b_year <- years[,data_for_selected_school$YEAR[i]]
+  b_assess <- assessments[,data_for_selected_school$ASSESSMENT_NAME[i]]
+  fy_6_post <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  fpost_pred_6_post[i] <- mean(fy_6_post)
+}
+
+# Female Pre Covid
+fpost_pred_6_pre <- numeric(total_obs_6)
+for (i in 1:total_obs_6) {
+  b_0 <- H_matrix[i,"b_0"]
+  b_female <- females[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_postcovid <- postcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_female_postcovid <- femalepostcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_racegap <- H_matrix[i,"b_racegap"] * data_for_selected_school$race_gap[i]
+  b_ellgap <- H_matrix[i,"b_ellgap"] * data_for_selected_school$ell_gap[i]
+  b_school <- schools[,data_for_selected_school$ENTITY_CD[i]]
+  b_year <- years[,data_for_selected_school$YEAR[i]]
+  b_assess <- assessments[,data_for_selected_school$ASSESSMENT_NAME[i]]
+  fy_6_pre <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  fpost_pred_6_pre[i] <- mean(fy_6_pre)
+}
+
+```
+
+
+```{r regressions1m, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_f6_post <- density(fpost_pred_6_post)
+density_f6_pre <- density(fpost_pred_6_pre)
+
+
+# Calculate mean and quantiles for females post covid
+quantiles_f6_post <- quantile(fpost_pred_6_post, 
+                                       probs = c(0.025, 0.975))
+mean_f6_post <- mean(fpost_pred_6_post)
+
+# Calculate mean and quantiles for females pre covid
+quantiles_f6_pre <- quantile(fpost_pred_6_pre, probs = c(0.025, 0.975))
+mean_post_f6_pre <- mean(fpost_pred_6_pre)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_f6_post$x)
+x_max <- max(density_f6_pre$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_f6_post, 
+     main="Females Posterior Distribution for School 2",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim = c(0, 0.3))
+
+lines(density_f6_pre, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_f6_post, col = "red", lty = 1) 
+abline(v = quantiles_f6_post, col = "red", lty = 4)
+
+abline(v = mean_post_f6_pre, col = "blue", lty = 1) 
+abline(v = quantiles_f6_pre, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Females Post Covid", "Females Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_f6_post - 0.2 * (x_max - x_min), 
+     max(density_f6_post$y) - 0.03, 
+     paste("Mean (Post Covid):", 
+           round(mean_f6_post, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_f6_pre - 0.2 * (x_max - x_min), 
+     max(density_f6_pre$y) - 0.05, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_f6_pre, 2)), col = "blue", , cex = 0.8)
+```
+
+```{r regressions2n, message=FALSE, fig.height=3, fig.width=4}
+
+# Male Post-Covid
+mpost_pred_6_post <- numeric(total_obs_6)
+for (i in 1:total_obs_6) {
+  b_0 <- H_matrix[i,"b_0"]
+  b_female <- females[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_postcovid <- postcovid[, data_for_selected_school$ENTITY_CD[i]] * 1
+  b_female_postcovid <- femalepostcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_racegap <- H_matrix[i,"b_racegap"] * data_for_selected_school$race_gap[i]
+  b_ellgap <- H_matrix[i,"b_ellgap"] * data_for_selected_school$ell_gap[i]
+  b_school <- schools[,data_for_selected_school$ENTITY_CD[i]]
+  b_year <- years[,data_for_selected_school$YEAR[i]]
+  b_assess <- assessments[,data_for_selected_school$ASSESSMENT_NAME[i]]
+  my_6_post <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  mpost_pred_6_post[i] <- mean(my_6_post)
+}
+
+# Male Pre Covid
+mpost_pred_6_pre <- numeric(total_obs_6)
+for (i in 1:total_obs_6) {
+  b_0 <- H_matrix[i,"b_0"]
+  b_female <- females[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_postcovid <- postcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_female_postcovid <- femalepostcovid[, data_for_selected_school$ENTITY_CD[i]] * 0
+  b_racegap <- H_matrix[i,"b_racegap"] * data_for_selected_school$race_gap[i]
+  b_ellgap <- H_matrix[i,"b_ellgap"] * data_for_selected_school$ell_gap[i]
+  b_school <- schools[,data_for_selected_school$ENTITY_CD[i]]
+  b_year <- years[,data_for_selected_school$YEAR[i]]
+  b_assess <- assessments[,data_for_selected_school$ASSESSMENT_NAME[i]]
+  my_6_pre <- as.vector(b_0 + b_female + b_postcovid + b_female_postcovid + 
+                        b_racegap + b_ellgap + b_school + b_year + b_assess)
+  mpost_pred_6_pre[i] <- mean(my_6_pre)
+}
+
+```
+
+
+
+```{r regressions2o, message=FALSE, fig.height=3, fig.width=4}
+
+# Density Plot
+density_m6_post <- density(mpost_pred_6_post)
+density_m6_pre <- density(mpost_pred_6_pre)
+
+# Calculate mean and quantiles for females post covid
+quantiles_m6_post <- quantile(mpost_pred_6_post, 
+                                       probs = c(0.025, 0.975))
+mean_m6_post <- mean(mpost_pred_6_post)
+
+# Calculate mean and quantiles for females pre covid
+quantiles_m6_pre <- quantile(mpost_pred_6_pre, probs = c(0.025, 0.975))
+mean_post_m6_pre <- mean(mpost_pred_6_pre)
+
+# Find the minimum and maximum values of the density x-axis
+x_min <- min(density_m6_post$x)
+x_max <- max(density_m6_pre$x)
+
+# Plot the density with expanded x-axis limits
+plot(density_m6_post, 
+     main="Males Posterior Distribution for School 2",
+     xlab="Values", ylab="Density", col="red", xlim=c(x_min - 1, x_max + 1),
+     ylim = c(0, 0.3))
+
+lines(density_m6_pre, col="blue")
+
+# Calculate mean and quantile line
+abline(v = mean_m6_post, col = "red", lty = 1) 
+abline(v = quantiles_m6_post, col = "red", lty = 4)
+
+abline(v = mean_post_m6_pre, col = "blue", lty = 1) 
+abline(v = quantiles_m6_pre, col = "blue", lty = 4)
+
+# Adding legend
+legend("topleft", legend=c("Males Post Covid", "Males Pre Covid"), 
+       col=c("red", "blue"), lty=1, title="Group")
+
+text(mean_m6_post - 0.2 * (x_max - x_min), 
+     max(density_m6_post$y) - 0.03, 
+     paste("Mean (Post Covid):", 
+           round(mean_m6_post, 2)), col = "red", , cex = 0.8)
+
+text(mean_post_m6_pre - 0.2 * (x_max - x_min), 
+     max(density_m6_pre$y) - 0.05, 
+     paste("Mean (Pre Covid):", 
+           round(mean_post_m6_pre, 2)), col = "blue", , cex = 0.8)
+```
+
+8. Other Effects and Checks for Supplementary Understanding - Not Reported in the Paper
+
+```{r regressions2p, message=FALSE, fig.height=3, fig.width=8}
+
+assess_H <- as.matrix(out_H[[1]][, grep("b_assess", colnames(out_H[[1]]))])
+
+# Calculate mean 
+mean_assess_H <- colMeans(assess_H)
+
+# Calculate quantiles
+quantile_2p5_a <- apply(assess_H, 2, quantile, probs = 0.025)
+quantile_97p5_a <- apply(assess_H, 2, quantile, probs = 0.975)
+
+levels <- c("ELA3", "ELA4", "ELA5", "ELA6", "ELA7", "ELA8", "MATH3", "MATH4", 
+            "MATH5", "MATH6", "MATH7", "MATH8")
+
+
+# Determine overall min and max for the plot limits
+overall_min <- 0
+overall_max <- 300
+
+# Create an empty plot
+plot(1:length(mean_assess_H), mean_assess_H, type = "n", xlab = "Assessments", ylab = "Mean Test Score",
+     main = "Assessment Coefficient", ylim = c(overall_min, overall_max), xaxt = "n")
+
+# Add points for mean values
+points(1:length(mean_assess_H), mean_assess_H, col = "blue", pch = 19)
+
+axis(1, at = 1:length(mean_assess_H), labels = levels, cex.axis = 0.8, tick = TRUE)
+
+for (i in 1:length(quantile_2p5_a)) {
+  segments(i, quantile_2p5_a[i], i, quantile_97p5_a[i], col = "blue")
+}
+
+```
+
+```{r regressions2q, message=FALSE, fig.height=3, fig.width=8}
+
+year_H <- as.matrix(out_H[[1]][, grep("b_year", colnames(out_H[[1]]))])
+
+# Calculate mean 
+mean_year_H <- colMeans(year_H)
+
+# Calculate quantiles
+quantile_2p5_y <- apply(year_H, 2, quantile, probs = 0.025)
+quantile_97p5_y <- apply(year_H, 2, quantile, probs = 0.975)
+
+levels <- c("2018", "2019", "2021", "2022")
+
+# Determine overall min and max for the plot limits
+overall_min <- 200
+overall_max <- 450
+
+# Find the index of 2019 and 2021 in the levels vector
+year_2019 <- which(levels == "2019")
+year_2021 <- which(levels == "2021")
+
+# Create an empty plot without plotting x-axis
+plot(1:length(mean_year_H), mean_year_H, type = "n", xlab = "Assessments", ylab = "Mean Test Score",
+     main = "Mean Test Scores by Assessment", ylim = c(overall_min, overall_max), xaxt = "n")
+
+# Add points for mean values
+points(1:length(mean_year_H), mean_year_H, col = "blue", pch = 19)
+
+axis(1, at = 1:length(mean_year_H), labels = levels, cex.axis = 0.8, tick = TRUE)
+
+for (i in 1:length(quantile_2p5_y)) {
+  segments(i, quantile_2p5_y[i], i, quantile_97p5_y[i], col = "blue")
+}
+
+# Adding a vertical line for the year 2020 (between 2019 and 2021)
+abline(v = (year_2019 + year_2021) / 2, col = "red", lty = 2)
+
+# Adding text for pre-COVID and post-COVID
+text((year_2019 + year_2021) / 2 - 0.2, overall_max - 20, "Pre-COVID", col = "red")
+text((year_2019 + year_2021) / 2 + 0.2, overall_max - 20, "Post-COVID", col = "red")
+text((year_2019 + year_2021) / 2, overall_min, "2020", col = "red")
+
+
+# Adding a horizontal dotted line at the mean test score
+abline(h = mean(mean_year_H), col = "green", lty = 3)
+
+```
+
+
+
+
+
